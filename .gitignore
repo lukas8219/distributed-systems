@@ -44,3 +44,6 @@ bin/
 .DS_Store
 
 s3stream-poc/s3stream/
+maelstrom/maelstrom
+maelstrom/store
+maelstrom/**/bin
