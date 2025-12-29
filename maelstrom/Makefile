@@ -26,3 +26,5 @@ run-broadcast-c: build-broadcast
 
 serve:
 	$(MAELSTROM_BIN) serve
+clean:
+	rm -rf ./store

@@ -1,20 +1,59 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"strings"
+	"time"
 
 	"sync"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )
 
+type Neighbor struct {
+  id string
+  lastSyncedVersion float64
+}
+
+func now() int64 {
+  return time.Now().UnixNano()
+}
+
 func main(){
   n := maelstrom.NewNode()
-  state := map[float64]struct{}{}
-  var neighbors = make([]string, 0)
+  index := map[float64]struct{}{} //this would be reconstructed from the WAL/state variable
+  state := make([]float64, 0)
+  var neighbors = map[string]*Neighbor{}
   var lock sync.RWMutex
+
+  n.Handle("sync", func(msg maelstrom.Message) error {
+    lock.Lock()
+    defer lock.Unlock()
+    var body map[string]any
+    if err := json.Unmarshal(msg.Body, &body); err != nil {
+      return err
+    }
+    currentState := float64(len(state))
+    dt := body["delta"].(float64)
+    if currentState == dt {
+      // all good
+      return nil
+    }
+    if currentState < dt {
+      panic("Invalid state")
+    }
+    missingMessages := state[int(dt):int(currentState)] 
+    return n.Reply(msg, map[string]any {
+      "type": "sync_ok",
+      "messages_delta": missingMessages,
+      "delta": currentState,
+    } )
+  })
+  n.Handle("sync_ok", func(msg maelstrom.Message) error {
+    return nil
+  })
 
   n.Handle("broadcast_ok", func(msg maelstrom.Message) error {
     return nil
@@ -28,6 +67,7 @@ I can still spend some time in making SyncRPC work (as, although not performant)
 Rather not optimize before the real challenges
   */
 
+
   n.Handle("broadcast", func(msg maelstrom.Message) error {
     var body map[string]any
     if err := json.Unmarshal(msg.Body, &body); err != nil {
@@ -36,18 +76,18 @@ Rather not optimize before the real challenges
 
     message := body["message"].(float64)
     lock.Lock()
-    if _, ok := state[message]; ok {
-      lock.Unlock()
+    defer lock.Unlock()
+    if _, ok := index[message]; ok {
       return n.Reply(msg, map[string]any{"type":"broadcast_ok"})
     }
-    state[message] = struct{}{}
-    lock.Unlock()
+    index[message] = struct{}{}
+    state = append(state, message)
 
     for _, neighbor := range neighbors {
-      if strings.EqualFold(neighbor, msg.Src) {
+      if strings.EqualFold(neighbor.id, msg.Src) {
         continue
       }
-      n.Send(neighbor, map[string]any{ "type": "broadcast", "message": message })
+      n.Send(neighbor.id, map[string]any{ "type": "broadcast", "message": message })
     }
 
     return n.Reply(msg, map[string]any{
@@ -62,11 +102,11 @@ Rather not optimize before the real challenges
 
     messageNeighbors := body["topology"].(map[string]any)[n.ID()]
 
-    nnbrs := make([]string, 0)
     for _, v := range messageNeighbors.([]any) {
-      nnbrs = append(nnbrs, v.(string))
+      nnb := v.(string)
+      neigh := &Neighbor{ id: nnb, lastSyncedVersion: 0}
+      neighbors[nnb] = neigh
     }
-    neighbors = nnbrs
 
     return n.Reply(msg, map[string]any{
       "type": "topology_ok",
@@ -77,18 +117,49 @@ Rather not optimize before the real challenges
     if err := json.Unmarshal(msg.Body, &body); err != nil {
       return err
     }
-    messages := make([]float64, len(state))
-    for v := range state {
-      messages = append(messages, v)
-    }
     return n.Reply(msg, map[string]any{
       "type": "read_ok",
-      "messages": messages,
+      "messages": state,
     })
   })
+
+  bg := context.Background()
+  // This is a hard NO
+  go func(){
+    for range time.Tick(time.Millisecond * 250) {
+      for _, nb := range neighbors {
+        ctx, cancel := context.WithTimeout(bg, time.Second * 10)
+        defer cancel()
+        msg, err := n.SyncRPC(ctx, nb.id, map[string]any{
+          "type": "sync",
+          "delta": nb.lastSyncedVersion,
+        })
+        if err != nil {
+          continue
+        }
+        lock.Lock()
+        var body map[string]any
+        if err := json.Unmarshal(msg.Body, &body); err != nil {
+          continue
+        }
+        deltaMessage := body["messages_delta"].([]any)
+        for _, mAny := range deltaMessage {
+          m := mAny.(float64)
+          if _, ok := index[m]; ok {
+            continue
+          }
+          index[m] = struct{}{}
+          state = append(state, m)
+        }
+        neighbors[msg.Src].lastSyncedVersion = body["delta"].(float64)
+        lock.Unlock()
+      }
+    }
+  }()
 
   if err := n.Run(); err != nil {
     log.Fatal(err)
   }
+
 
 }
