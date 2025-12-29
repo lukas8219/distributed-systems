@@ -23,6 +23,8 @@ run-broadcast-b: build-broadcast
 	$(MAELSTROM_TEST) broadcast --bin ./maelstrom-broadcast/bin --node-count 5 --time-limit 20 --rate 10
 run-broadcast-c: build-broadcast
 	$(MAELSTROM_TEST) broadcast --bin ./maelstrom-broadcast/bin --node-count 5 --time-limit 20 --rate 10 --nemesis partition
+run-broadcast-d: build-broadcast
+	$(MAELSTROM_TEST) broadcast --bin ./maelstrom-broadcast/bin --node-count 25 --time-limit 20 --rate 100 -- latency 100
 
 serve:
 	$(MAELSTROM_BIN) serve
