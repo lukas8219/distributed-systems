@@ -21,6 +21,10 @@ run-broadcast-a: build-broadcast
 	$(MAELSTROM_TEST) broadcast --bin ./maelstrom-broadcast/bin --node-count 1 --time-limit 20 --rate 10
 run-broadcast-b: build-broadcast
 	$(MAELSTROM_TEST) broadcast --bin ./maelstrom-broadcast/bin --node-count 5 --time-limit 20 --rate 10
+run-broadcast-c: build-broadcast
+	$(MAELSTROM_TEST) broadcast --bin ./maelstrom-broadcast/bin --node-count 5 --time-limit 20 --rate 10 --nemesis partition
 
 serve:
 	$(MAELSTROM_BIN) serve
+clean:
+	rm -rf ./store
