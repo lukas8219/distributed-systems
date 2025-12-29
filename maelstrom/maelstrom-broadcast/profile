@@ -1,0 +1,3 @@
+#!/bin/bash
+B_PATH=$(dirname $BASH_SOURCE)
+$B_PATH/bin -profile=$B_PATH/$RANDOM.cpuprof

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"log"
+	"os"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -61,12 +64,27 @@ type ReadOk struct {
 	Messages []uint64 `json:"messages"`
 }
 
+func enableCpuProfileIfNeeded() *os.File {
+	var cpuProfile = flag.String("profile", "", "cpu profile enabling")
+	flag.Parse()
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		return f
+	}
+	return nil
+}
+
 func main() {
 	n := maelstrom.NewNode()
 	index := map[uint64]struct{}{} //this would be reconstructed from the WAL/state variable
 	state := make([]uint64, 0)
 	var neighbors = map[string]*Neighbor{}
 	var lock sync.RWMutex
+	var topologySynced = false
 
 	calculateDelta := func(delta uint64) (uint64, []uint64, error) {
 		currentState := uint64(len(state))
@@ -168,6 +186,8 @@ func main() {
 			neighbors[nnb] = neigh
 		}
 
+		topologySynced = true
+
 		return n.Reply(msg, TopologyOk{Type: "topology_ok"})
 	})
 	n.Handle("read", func(msg maelstrom.Message) error {
@@ -181,7 +201,7 @@ func main() {
 	bg := context.Background()
 
 	isNeighborsReady := func() bool {
-		return len(neighbors) != 0
+		return topologySynced
 	}
 	// This is a hard NO
 	//TODO: maybe move into different WG to control 2 concurrent syncs
@@ -212,6 +232,12 @@ func main() {
 			}
 		}
 	}()
+
+	f := enableCpuProfileIfNeeded()
+	if f != nil {
+		defer f.Close()
+		defer pprof.StopCPUProfile()
+	}
 
 	if err := n.Run(); err != nil {
 		log.Fatal(err)
