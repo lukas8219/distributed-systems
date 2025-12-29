@@ -47,3 +47,5 @@ s3stream-poc/s3stream/
 maelstrom/maelstrom
 maelstrom/store
 maelstrom/**/bin
+maelstrom/**/*.cpuprof
+
